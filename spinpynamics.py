@@ -16,9 +16,6 @@ class ProductOperator():
     spins : array-like, shape (n_spins, )
         Total spin quantum number of each spin centre. If None (default)
         then all spins are assumed to be S = 1/2.
-    
-    Methods
-    -------
     """
 
     def __init__(self, comps, *, coef=1.0, spins=None):
@@ -63,11 +60,11 @@ class ProductOperator():
         """
         # Make operator string
         if op_pattern is None:
-            op_label = 'S'.join(comp for comp in self.comps)
+            op_label = 'S' + ''.join([comp for comp in self.comps])
         else:
             op_label = op_pattern.format([comp for comp in self.comps])
         # Add amplitude if requested
-        if coef_pattern is not None:
+        if coef_pattern is None:
             coef_label = ''
         else:
             coef_label = coef_pattern.format(self.coef)
@@ -134,15 +131,13 @@ class ProductOperator():
     def __str__(self):
         return self.as_string()
 
+    def __add__(self, op):
+        if isinstance(op, ProductOperator):
+            if op.comps == self.comps:
+                self.set_coef(self.)
 
 class MultiOperatorMixin():
     """Methods relating to objects containing multiple ProductOperators.
-    
-    Parameters
-    ----------
-
-    Methods
-    -------
     """
 
     def get_label(self):
@@ -155,17 +150,22 @@ class MultiOperatorMixin():
         -------
         mat_rep : ndarray
         """
-        mat = 0.0
+        # Set default return
+        mat = None
         # Loop through all cartesian components
-        for comps in self.comps_:
-            # Get operator
-            op = self.ops_[comps]
+        for op in self.ops.values():
             # If there is non-zero amounts of it add it to the total
             if ~np.isclose(op.coef, 0.0):
-                mat += op.as_matrix()
+                # If matrix already started
+                if mat is not None:
+                    # Add to total
+                    mat += op.as_matrix()
+                # Otherwise start matrix
+                else:
+                    mat = 0.0*op.as_matrix() + op.as_matrix()
         return mat
 
-    def as_string(self, op_pattern=None, coef_pattern=None):
+    def as_string(self, op_pattern=None, coef_pattern='{:+.1f}'):
         """Generate string representation of spin operator
 
         Parameters
@@ -181,55 +181,88 @@ class MultiOperatorMixin():
         -------
         label : str
         """
+        # Get all Cartesian components
+        all_comps = [op.comps for op in self.ops.values()]
+        all_comps.sort()
+        # Start label
         label = ''
         # Loop through all cartesian components
-        for comps in self.comps_:
+        for comps_ in all_comps:
             # Get operator
-            op = self.ops_[comps]
+            op = self.ops[comps_]
             # If there is non-zero amounts of it add it to the total
             if ~np.isclose(op.coef, 0.0):
-                label += op.as_string(op_pattern, coef_pattern='{:+.1f}')
+                label += op.as_string(op_pattern, coef_pattern=coef_pattern)
         return label
 
-    def _gen_all_comp_ops(self):
-        """Generates all possible Cartesian component operators.
+    def _add_prodop(self, op, mod=1.0):
+        """Add a cartesian product operator
+
+        Parameters
+        ----------
+        op : ProductOperator
+            Number of spins must be consistent with self
+        mod : float
+            Multiplied onto coef of op, set to -1.0 for subtraction.
+
+        Returns
+        -------
+        self
         """
-        # All possible components
-        comp_iter = product(['i', 'x', 'y', 'z'], repeat=self.n_spins)
-        self.all_comps_ = [''.join(comps) for comps in comp_iter]
-        # Make dictionary of operators with comps as keys
-        self.all_ops_ = {(comps, ProductOperator(comps, spins=self.spins))
-                         for comps in self.all_comps_}
+        # If correct size
+        if op.n_spins_ == self.n_spins_:
+            # If operator already present
+            if op.comps in self.ops:
+                # Add to component
+                self.ops[op.comps].coef += mod*op.coef
+            # Otherwise make a new element
+            else:
+                self.ops[op.comps] = op
+                self.ops[op.comps].set_coef(mod*op.coef)
+        # If not correct size make error
+        else:
+            mssg = "Trying to add operators with {} and {} spins is not " + \
+                   "possible. Please check."
+            raise ValueError(mssg.format(op.n_spins_, self.n_spins_))
+        return self
+
+    def _add_spinop(self, op, mod=1.0):
+        """Add spin operator to spin operator
+
+        Parameters
+        ----------
+        op : SpinOperator
+            Number of spins must be consistent with self
+        mod : float
+            Multiplied onto coefs of each ProductOperator of op, set to -1.0
+            for subtraction.
+
+        Returns
+        -------
+        self
+        """
+        # Loop through each component
+        for op in ops.values():
+            # Add to total
+            self._add_prodop(op, mod)
+        return self
+
+    def __add__(self, op):
+        if isinstance(op, ProductOperator):
+            self._add_prodop(op)
+        elif isinstance(op, SpinOperator):
+            self._add_spinop(op)
+        return self
+
+    def __sub__(self, op):
+        if isinstance(op, ProductOperator):
+            self._add_prodop(op, mod=-1.0)
+        elif isinstance(op, SpinOperator):
+            self._add_spinop(op, mod=-1.0)
         return self
 
     def __str__(self):
         return self.as_string()
-
-
-class CartesianBasis(MultiOperatorMixin):
-    """Cartesian basis set for a particular number of spins.
-
-    As initialised, the coeffiecients of all basis operators is one. This
-    should probably be maintained, if you want to change the coefficients
-    use the SpinOperator class instead.
-
-    Parameters
-    ----------
-    n_spins : int
-        Number of spins
-    spins : array-like, shape (n_spins, )
-        Total spin quantum number of each spin centre. If None (default)
-        then all spins are assumed to be S = 1/2.
-    
-    Methods
-    -------
-
-    """
-
-    def __init__(self, n_spins, *, spins=None):
-        self.n_spins = n_spins
-        self.spins = spins
-        self._gen_all_comp_ops()
 
 
 class SpinOperator(MultiOperatorMixin):
@@ -240,16 +273,22 @@ class SpinOperator(MultiOperatorMixin):
 
     Parameters
     ----------
-    ops : list of ProductOperator objects
+    ops : array-like of ProductOperator objects
         Operators which make up SpinOperator.
-    
-    Methods
-    -------
 
     """
 
     def __init__(self, ops):
-        self.ops = ops
+        # Check consistency and copy into dictionary
+        self.n_spins_ = ops[0].n_spins_
+        self.ops = {}
+        for op in ops:
+            # If
+            if op.n_spins_ == self.n_spins_:
+
+        self.n_spins_ = lops[0].comps)
+        self.ops_ = dict((op.comps, op) for op in ops)
+        self._all_comps =
 
     def set_coef(self, comps, coef):
         """Set coefficient of an operator
@@ -285,8 +324,20 @@ class SpinOperator(MultiOperatorMixin):
             raise ValueError(mssg)
 
     def __add__(self, spin_operator):
-        # Make sure same size
-        pass
+
+        # Copy current state
+        ops_ = dict(self.ops_.items())
+        # Loop through keys of spin operator to add
+
+# def Pulse(SpinOperator):
+#     """Set up a pulse
+
+if __name__ == '__main__':
+    # Make a spin operator and print it
+    mymat = SpinOperator([ProductOperator('zi'), ProductOperator('iz')])
+    print(mymat)
+
+
 # class CartesianSpinOperator():
 #     """Spin operator expressed as sum of Cartesian components
 
