@@ -1,4 +1,5 @@
 """SpinPynamics: Spin operator calculations in Python"""
+from setuptools import setup
 import versioneer
 
 doc_lines = (__doc__ or '').split("\n")
@@ -22,6 +23,14 @@ Topic :: Scientific/Engineering :: Physics
 Typing :: Typed
 """
 
+dependecies = [
+    "numpy",
+    "scipy",
+    "numpydoc",
+    "sphinx",
+    "sphinx-rtd-theme",
+]
+
 if __name__ == "__main__":
     metadata = dict(
         name='spinpynamics',
@@ -32,19 +41,20 @@ if __name__ == "__main__":
         url="https://github.com/edmundxcvi/spinpynamics",
         author="Edmund Little",
         download_url="https://github.com/edmundxcvi/spinpynamics",
-        project_urls={
-            "Source Code": "https://github.com/edmundxcvi/spinpynamics",
-        },
         license='GNU GPL v3',
         classifiers=[_f for _f in classifiers.split('\n') if _f],
         test_suite='pytest',
         version=versioneer.get_version(),
         cmdclass=versioneer.get_cmdclass(),
-        command_options={'build_sphinx': {'source_dir': ('setup.py', './docs'),
-                                          'build_dir': ('setup.py', './build')}},
+        command_options={
+            'build_sphinx': dict((
+                ('source_dir', ('setup.py', './docs')),
+                ('build_dir', ('setup.py', './build')),
+                ('version', ('setup.py', versioneer.get_version())),
+            ))
+        },
         python_requires='>=3.7',
-        install_requires=dependencies,
+        install_requires=dependecies,
         zip_safe=False,
-        configuration=configuration
     )
     setup(**metadata)
