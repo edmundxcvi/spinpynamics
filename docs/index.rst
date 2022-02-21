@@ -8,7 +8,5 @@ Welcome to spinpynamics's documentation!
 
 .. autosummary::
    :toctree: auto_summary
-   :template: custom-module-template.rst
-   :recursive:
 
    spinpynamics
