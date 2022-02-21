@@ -597,7 +597,7 @@ if __name__ == '__main__':
                           ProductOperator('ix', coef=np.pi)])
 
     X = np.linspace(0, 20*np.pi, 101)
-    sig = np.zeros((X.size, 4), dtype=np.complex128)
+    sig = np.zeros((X.size, 4))
     rho0 = SpinOperator([ProductOperator('zi'), ProductOperator('iz')])
     rho0plus = rho0.nutate(x_90)
 
@@ -609,10 +609,10 @@ if __name__ == '__main__':
         rhotauminus = rho0plus.nutate(tau)
         rhotauplus = rhotauminus.nutate(x_180)
         rhotwotau = rhotauplus.nutate(tau)
-        sig[i, 0] = rhotwotau.expectation_value(ProductOperator('xz'))
-        sig[i, 1] = rhotwotau.expectation_value(ProductOperator('yi'))
-        sig[i, 2] = rhotwotau.expectation_value(ProductOperator('zx'))
-        sig[i, 3] = rhotwotau.expectation_value(ProductOperator('iy'))
+        sig[i, 0] = np.real(rhotwotau.expectation_value(ProductOperator('xz')))
+        sig[i, 1] = np.real(rhotwotau.expectation_value(ProductOperator('yi')))
+        sig[i, 2] = np.real(rhotwotau.expectation_value(ProductOperator('zx')))
+        sig[i, 3] = np.real(rhotwotau.expectation_value(ProductOperator('iy')))
     fig, ax = plt.subplots()
     ax.plot(X, sig[:, 0], label='Sxz')
     ax.plot(X, sig[:, 1], label='Syi')
