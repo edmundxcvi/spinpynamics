@@ -35,14 +35,22 @@ class ProductOperator():
     def get_label(self):
         return self.as_string()
 
-    def as_matrix(self):
+    def as_matrix(self, *, norm=False):
         """Return matrix representation of operator scaled by coef
 
+        Parameters
+        ----------
+        norm : bool
+            If True returns normalised matrix representation, otherwise returns
+            scaled by coef.
         Returns
         -------
         mat_rep : ndarray
         """
-        return self.coef*self.mat_rep_
+        if norm:
+            return self._mat_rep
+        else:
+            return self.coef*self._mat_rep
 
     def as_string(self, op_pattern=None, coef_pattern=None):
         """Generate string representation of cartesian component operator
@@ -73,7 +81,7 @@ class ProductOperator():
         # Combine and return
         return coef_label + op_label
 
-    def commutator(self, op, *, norm=False):
+    def commutator(self, op, *, norm=True):
         """Calculate commutator with another product operator
 
         op is treated as 'operator B'
@@ -82,43 +90,129 @@ class ProductOperator():
         ----------
         op : ProductOperator
         norm : bool
-            If True, commutator returned with coef=1.0
+            If True, commutator is returned with unit coeficient.
         Returns
         -------
         op_t : ProductOperator
             Commutator
         """
         # Calculate commutator
-        opA = self.as_matrix()
-        opB = op.as_matrix()
+        opA = self.as_matrix(norm=norm)
+        opB = op.as_matrix(norm=norm)
         com_mat = np.matmul(opA, opB) - np.matmul(opB, opA)
         # If zero return None
         if np.all(np.isclose(com_mat, 0.0)):
             return None
+        # Otherwise make spin operator
         else:
-            # Otherwise make spin operator
+            # Make SpinOperator
             spin_op = SpinOperator.from_mat(com_mat, spins=self.spins)
-            if len(spin_op.ops) == 1:
-                # Ensure unit amplitude
-                op_t = list(spin_op.ops.values())[0]
-                if norm is True:
-                    op_t.coef = op_t.coef/np.abs(op_t.coef)
+            # If comprises a single ProductOperator
+            if spin_op._is_prodop():
+                # Convert to ProductOperator
+                op_t = spin_op.as_prodop()
                 return op_t
+            # Otherwise complain
             else:
                 raise ValueError('Product operator commutator invalid.')
+
+    def nutate(self, rot_op):
+        """Nutate product operator about rotation operator
+
+        Parameters
+        ----------
+        rot_op : ProductOperator or SpinOperator
+            Operator to nutate around
+
+        Returns
+        -------
+        op_t : ProductOperator or SpinOperator
+            Rotated copy of self
+        """
+        if isinstance(rot_op, ProductOperator):
+            op_t = self._nutate_prodop(rot_op)
+        else:
+            op_t = self._nutate_spinop(rot_op)
+        return op_t
+
+    def _nutate_prodop(self, rot_op):
+        """Nutate about another ProductOperator
+
+        Returns
+        -------
+        op_t : ProductOperator or SpinOperator
+            Rotated copy of self
+        """
+        # Copy self
+        op_t = ProductOperator(comps=self.comps, coef=self.get_coef(),
+                               spins=self.spins)
+        # Get commutator
+        com_op = op_t.commutator(rot_op)
+        # If commutator is zero return copy
+        if com_op is None:
+            return op_t
+        # If rotation occured
+        else:
+            # Get coeficients in rotated operator
+            coef_a = op_t.get_coef()*np.cos(rot_op.coef)
+            coef_b = op_t.get_coef()*np.sin(rot_op.coef)
+            # Update operators
+            op_t.set_coef(coef_a)
+            com_op.set_coef(-coef_b*com_op.get_coef()/1.0j)
+            # If rotation is 90 + n*180 degrees
+            if np.isclose(op_t.get_coef(), 0.0):
+                return com_op
+            # If rotation is n*180 degrees
+            elif np.isclose(com_op.get_coef(), 0.0):
+                return op_t
+            # Otherwise
+            else:
+                return op_t + com_op
+
+    def _nutate_spinop(self, rot_op):
+        """Nutate about a SpinOperator
+
+        Returns
+        -------
+        op_t : ProductOperator or SpinOperator
+            Rotated copy of self
+        """
+        # Copy self
+        op_t = ProductOperator(comps=self.comps, coef=self.get_coef(),
+                               spins=self.spins)
+        # If all components of rot_op commute apply in turn
+        if rot_op._all_commute():
+            # Loop through all components
+            for op_ in rot_op:
+                # Nutate operator
+                op_t = op_t.nutate(op_)
+        # If rot_op does not commute use brute force
+        else:
+            # Calculate propogators (slow)
+            prop = expm(-1.0j*rot_op.as_matrix())
+            prop_t = expm(+1.0j*rot_op.as_matrix())
+            # Matrix representation of rotated operator
+            op_t_mat = np.matmul(np.matmul(prop, self.as_matrix()), prop_t)
+            # Convert to ProductOperators
+            op_t = SpinOperator.from_mat(op_t_mat)
+        return op_t
 
     def _gen_matrix_rep(self):
         """Generate matrix representation"""
         # Count spins
-        self.n_spins_ = len(self.comps)
+        self._n_spins = len(self.comps)
         # Start matrix
-        self.mat_rep_ = np.array([[1.0]])
+        self._mat_rep = np.array([[1.0]])
         # Inflate with operators
-        for i_spin in range(self.n_spins_):
+        for i_spin in range(self._n_spins):
             op_mat = self._onespin_matrix_rep(i_spin)
-            self.mat_rep_ = np.kron(self.mat_rep_, op_mat)
+            self._mat_rep = np.kron(self._mat_rep, op_mat)
         # Count final dimension
-        self.n_hilb_ = self.mat_rep_.shape[0]
+        self._n_hilb = self._mat_rep.shape[0]
+        # Normalise
+        self._scale = np.trace(np.matmul(self._mat_rep, self._mat_rep))
+        self._scale = 1.0/np.sqrt(self._scale)
+        self._mat_rep *= self._scale
         return self
 
     def _onespin_matrix_rep(self, ind):
@@ -164,34 +258,35 @@ class ProductOperator():
                 mat[i_ms, i_ms] = 1.0
         return mat
 
+    def _add_prodop(self, op, *, mod=1.0):
+        if op.comps == self.comps:
+            self.set_coef(self.get_coef() + mod*op.get_coef())
+            return self
+        else:
+            op.set_coef(mod*op.get_coef())
+            return SpinOperator([self, op])
+
+    def _add_spinop(self, op, *, mod=1.0):
+        all_ops = [self]
+        for prod_op in op.get_ops_list():
+            prod_op.set_coef(mod*prod_op.get_coef())
+            all_ops.append(prod_op)
+        return SpinOperator(all_ops)
+
     def __str__(self):
         return self.as_string()
 
     def __add__(self, op):
         if isinstance(op, ProductOperator):
-            if op.comps == self.comps:
-                self.set_coef(self.coef + op.coef)
-                return self
-            else:
-                return SpinOperator([self, op])
-        if isinstance(op, SpinOperator):
-            return SpinOperator([self] + list(op.ops.values()))
+            return self._add_prodop(op)
+        else:
+            return self._add_spinop(op)
 
     def __sub__(self, op):
         if isinstance(op, ProductOperator):
-            if op.comps == self.comps:
-                self.set_coef(self.coef - op.coef)
-                return self
-            else:
-                op.coef *= -1.0
-                return SpinOperator([self, op])
-        if isinstance(op, SpinOperator):
-            all_ops = [self]
-            for comps in op.ops.keys():
-                op = op.ops[comps]
-                op.set_coef(-1.0*op.get_coef())
-                all_ops.append()
-            return SpinOperator(all_ops)
+            return self._add_prodop(op, mod=-1.0)
+        else:
+            return self._add_spinop(op, mod=-1.0)
 
     def __mult__(self, val):
         self.set_coef(val*self.coef)
@@ -213,7 +308,7 @@ class SpinOperator():
 
     def __init__(self, ops):
         # Get number of spins
-        self.n_spins_ = ops[0].n_spins_
+        self._n_spins = ops[0]._n_spins
         # Start product operator dictionary
         self.ops = {ops[0].comps: ops[0]}
         # Add in any further product operators
@@ -260,7 +355,7 @@ class SpinOperator():
         return {(comps, op.coef) for comps, op in self.ops.items()}
 
     def get_coef_list(self):
-        return [op.coef for op in self.ops.values()]
+        return [op.coef for op in self.get_ops_list()]
 
     def get_ops_dict(self):
         return self.ops
@@ -278,7 +373,7 @@ class SpinOperator():
         # Set default return
         mat = None
         # Loop through all cartesian components
-        for op in self.ops.values():
+        for op in self.get_ops_list():
             # If there is non-zero amounts of it add it to the total
             if ~np.isclose(op.coef, 0.0):
                 # If matrix already started
@@ -307,7 +402,7 @@ class SpinOperator():
         label : str
         """
         # Get all Cartesian components
-        all_comps = [op.comps for op in self.ops.values()]
+        all_comps = [op.comps for op in self.get_ops_list()]
         all_comps.sort()
         # Start label
         label = ''
@@ -319,6 +414,22 @@ class SpinOperator():
             if ~np.isclose(op.coef, 0.0):
                 label += op.as_string(op_pattern, coef_pattern=coef_pattern)
         return label
+
+    def as_prodop(self):
+        """Return SpinOperator as ProductOperator
+
+        Only works if SpinOperator only contains one Product Operator.
+
+        Returns
+        -------
+        op : ProductOperator
+        """
+        if self._is_prodop():
+            return self.get_ops_list()[0]
+        else:
+            mssg = 'SpinOperator cannot be converted to ProductOperator ' + \
+                   'as it contains {} Cartesian components.'
+            raise ValueError(mssg.format(len(self.ops)))
 
     def normalise(self):
         """Normalises amplitudes of operator coeficients.
@@ -338,7 +449,7 @@ class SpinOperator():
         # Normalise array
         coef_norm = coef_array*np.sqrt(2.0)/euc_norm
         # Update coeficients
-        for coef_, op in zip(coef_norm, self.ops.values()):
+        for coef_, op in zip(coef_norm, self.get_ops_list()):
             op.set_coef(coef_)
         return self
 
@@ -354,9 +465,7 @@ class SpinOperator():
         val : float
             Expectation value
         """
-        val = np.trace(np.matmul(self.as_matrix(), op.as_matrix()))
-        norm = np.trace(np.matmul(op.as_matrix(), op.as_matrix()))
-        return val/norm
+        return np.trace(np.matmul(self.as_matrix(), op.as_matrix()))
 
     def nutate(self, rot_op):
         """Brute force nutation of spin operator
@@ -378,12 +487,8 @@ class SpinOperator():
         elif isinstance(rot_op, SpinOperator):
             # If all components commute
             if rot_op._all_commute() is True:
-                # Copy self
-                op_t = SpinOperator(self.get_ops_list())
-                # Loop through all components of rotation operator
-                for op in rot_op.get_ops_list():
-                    # And apply them in turn (order not important)
-                    op_t = op_t._nut_prodop(op)
+                # Rotate using commuation relationships
+                op_t = self._nut_spinop(rot_op)
             # Otherwise brute force with propogators
             else:
                 op_t = self._nut_propagator(rot_op)
@@ -402,41 +507,38 @@ class SpinOperator():
         op_t : SpinOperator
             Rotated spin operator, as a new copy of the original spin operator
         """
-        # Loop through all ProductOperators
+        # Start output
         op_t = None
-        for op in self.ops.values():
-            # Make copy of operators with unit coeficients
-            op_ = ProductOperator(op.comps, spins=op.spins)
-            rot_ = ProductOperator(rot_op.comps, spins=rot_op.spins)
-            # Calculate commutator
-            com = op_.commutator(rot_, norm=True)
-            # If commutator is not zero
-            if com is not None:
-                # Commutator sign
-                com_sign = np.real(-com.coef/1j)
-                coef_a = np.cos(rot_op.coef)*op.coef
-                coef_b = np.sin(rot_op.coef)*op.coef*com_sign
-                # Create operators
-                op_a = ProductOperator(op.comps, coef=coef_a, spins=op.spins)
-                op_b = ProductOperator(com.comps, coef=coef_b, spins=op.spins)
-                # Add to temporary if significant
-                if ~np.isclose(coef_a, 0.0) and ~np.isclose(coef_b, 0.0):
-                    op_ = op_a + op_b
-                elif ~np.isclose(coef_a, 0.0) and np.isclose(coef_b, 0.0):
-                    op_ = op_a
-                elif np.isclose(coef_a, 0.0) and ~np.isclose(coef_b, 0.0):
-                    op_ = op_b
-            # If commutator is zero
-            else:
-                op_ = ProductOperator(op.comps, coef=op.coef, spins=op.spins)
+        # Loop through all ProductOperators in self
+        for op in self.get_ops_list():
+            # Rotate operator
+            op_ = op.nutate(rot_op)
             # Add to total
             if op_t is None:
                 op_t = op_
             else:
                 op_t = op_t + op_
-        # Ensure spin operator
-        if isinstance(op_t, ProductOperator):
-            op_t = SpinOperator([op_t])
+        return op_t
+
+    def _nut_spinop(self, rot_op):
+        """Nutate by spin operator using commutators
+
+        Parameters
+        ----------
+        rot_op : SpinOperator
+            Operator to nutate by
+
+        Returns
+        -------
+        op_t : SpinOperator
+            Rotated spin operator, as a new copy of the original spin operator
+        """
+        # Copy self
+        op_t = SpinOperator(self.get_ops_list())
+        # Loop through all ProductOperators in rot_op
+        for op in rot_op.get_ops_list():
+            # Rotate operator
+            op_t = op_t._nut_prodop(op)
         return op_t
 
     def _nut_propagator(self, rot_op):
@@ -468,12 +570,25 @@ class SpinOperator():
         tf : bool
             True if all ProductOperators in SpinOperator commute
         """
-        for i_opA, opA in enumerate(self.ops.values()):
-            subsequent_ops = list(self.ops.values())[i_opA + 1:]
+        for i_opA, opA in enumerate(self.get_ops_list()):
+            subsequent_ops = self.get_ops_list()[i_opA + 1:]
             for opB in subsequent_ops:
                 if opB.commutator(opA) is not None:
                     return False
         return True
+
+    def _is_prodop(self):
+        """Determine if SpinOperator contains more than one product operator
+
+        Returns
+        -------
+        tf : bool
+            True if SpinOperator contains only one ProductOperator
+        """
+        if len(self.ops) == 1:
+            return True
+        else:
+            return False
 
     def _add_prodop(self, op, mod=1.0):
         """Add a cartesian product operator
@@ -490,7 +605,7 @@ class SpinOperator():
         self
         """
         # If correct size
-        if op.n_spins_ == self.n_spins_:
+        if op._n_spins == self._n_spins:
             # If operator already present
             if op.comps in self.ops:
                 # Add to component
@@ -503,7 +618,7 @@ class SpinOperator():
         else:
             mssg = "Trying to add operators with {} and {} spins is not " + \
                    "possible. Please check."
-            raise ValueError(mssg.format(op.n_spins_, self.n_spins_))
+            raise ValueError(mssg.format(op._n_spins, self._n_spins))
         return self
 
     def _add_spinop(self, op, mod=1.0):
@@ -522,7 +637,7 @@ class SpinOperator():
         self
         """
         # Copy operator
-        return SpinOperator(list(self.ops.values()) + list(op.ops.values()))
+        return SpinOperator(list(self.get_ops_list()) + list(op.get_ops_list()))
 
     def __add__(self, op):
         if isinstance(op, ProductOperator):
