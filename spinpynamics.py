@@ -198,12 +198,63 @@ class ProductOperator():
         return self
 
 
-class MultiOperatorMixin():
-    """Methods relating to objects containing multiple ProductOperators.
+class SpinOperator():
+    """Spin operator (which can comprise linear combinations of product
+    operators)
+
+    Initialised from ProductOperator objects.
+
+    Parameters
+    ----------
+    ops : array-like of ProductOperator objects
+        Operators which make up SpinOperator.
+
     """
+
+    def __init__(self, ops):
+        # Get number of spins
+        self.n_spins_ = ops[0].n_spins_
+        # Start product operator dictionary
+        self.ops = {ops[0].comps: ops[0]}
+        # Add in any further product operators
+        for op in ops[1:]:
+            self._add_prodop(op)
 
     def get_label(self):
         return self.as_string()
+
+    def set_coef(self, comps, coef):
+        """Set coefficient of an operator
+
+        Parameters
+        ----------
+        comps : str, len (n_spins, )
+            Labels of Cartesian components of each spin in operator - including
+            'i' for identity if required.
+        coef : float
+            Coefficient of operator
+        """
+        if comps in self.comps:
+            self.ops_[comps].coef = coef
+        else:
+            mssg = '{:} is not a valid component string'.format(comps)
+            raise ValueError(mssg)
+        return self
+
+    def get_coef(self, comps):
+        """Set coefficient of an operator
+
+        Parameters
+        ----------
+        comps : str, len (n_spins, )
+            Labels of Cartesian components of each spin in operator - including
+            'i' for identity if required.
+        """
+        if comps in self.comps:
+            return self.ops_[comps].coef
+        else:
+            mssg = '{:} is not a valid component string'.format(comps)
+            raise ValueError(mssg)
 
     def get_coef_dict(self):
         return {(comps, op.coef) for comps, op in self.ops.items()}
@@ -470,18 +521,16 @@ class MultiOperatorMixin():
         -------
         self
         """
-        # Loop through each component
-        for op_ in op.ops.values():
-            # Add to total
-            self._add_prodop(op_, mod)
-        return self
+        # Copy operator
+        return SpinOperator(list(self.ops.values()) + list(op.ops.values()))
 
     def __add__(self, op):
         if isinstance(op, ProductOperator):
             self._add_prodop(op)
+            return self
         elif isinstance(op, SpinOperator):
-            self._add_spinop(op)
-        return self
+            op_ = self._add_spinop(op)
+            return op_
 
     def __sub__(self, op):
         if isinstance(op, ProductOperator):
@@ -531,71 +580,64 @@ class MultiOperatorMixin():
         return SpinOperator(ops)
 
 
-class SpinOperator(MultiOperatorMixin):
-    """Spin operator (which can comprise linear combinations of product
-    operators)
-
-    Initialised from ProductOperator objects.
+class Pulse(SpinOperator):
+    """Generates SpinOpertor-like object
 
     Parameters
     ----------
-    ops : array-like of ProductOperator objects
-        Operators which make up SpinOperator.
-
+    phase : float
+        Phase of pulse in **degrees**, i.e. 0 for +x, 90 for +y, 180 for -x,
+        270 for -y.
+    beta : float
+        Flip angle in **degrees**, i.e. 90 for pi/2 pulse and 180 for pi pulse
+    active_spins : array-like of bool
+        Spins which pulse acts on
+    spins : array-like, shape (n_spins, )
+        Total spin quantum number of each spin centre. If None (default)
+        then all spins are assumed to be S = 1/2.
     """
 
-    def __init__(self, ops):
-        # Get number of spins
-        self.n_spins_ = ops[0].n_spins_
-        # Start product operator dictionary
-        self.ops = {ops[0].comps: ops[0]}
-        # Add in any further product operators
-        for op in ops[1:]:
-            self._add_prodop(op)
+    def __init__(self, phase, beta, active_spins, *, spins=None):
+        self.phase = phase
+        self.beta = beta
+        self.active_spins = active_spins
+        self._get_coefs()
+        super().__init__(self._get_operators(spins))
 
-    def set_coef(self, comps, coef):
-        """Set coefficient of an operator
-
-        Parameters
-        ----------
-        comps : str, len (n_spins, )
-            Labels of Cartesian components of each spin in operator - including
-            'i' for identity if required.
-        coef : float
-            Coefficient of operator
-        """
-        if comps in self.comps:
-            self.ops_[comps].coef = coef
-        else:
-            mssg = '{:} is not a valid component string'.format(comps)
-            raise ValueError(mssg)
+    def _get_coefs(self):
+        degree = 180.0/np.pi
+        self.coef_x = np.cos(self.phase/degree)*self.beta/degree
+        self.coef_y = np.sin(self.phase/degree)*self.beta/degree
         return self
 
-    def get_coef(self, comps):
-        """Set coefficient of an operator
-
-        Parameters
-        ----------
-        comps : str, len (n_spins, )
-            Labels of Cartesian components of each spin in operator - including
-            'i' for identity if required.
-        """
-        if comps in self.comps:
-            return self.ops_[comps].coef
-        else:
-            mssg = '{:} is not a valid component string'.format(comps)
-            raise ValueError(mssg)
+    def _get_operators(self, spins):
+        op_list = []
+        for i_spin, spin in enumerate(self.active_spins):
+            if spin:
+                comps = ['i' for spin in self.active_spins]
+                comps[i_spin] = 'p'
+                comps = ''.join(comp for comp in comps)
+                comps_x = comps.replace('p', 'x')
+                comps_y = comps.replace('p', 'y')
+                # x-pulse
+                if ~np.isclose(self.coef_x, 0.0):
+                    op_list.append(ProductOperator(comps_x,
+                                                   coef=self.coef_x,
+                                                   spins=spins))
+                # y-pulse
+                if ~np.isclose(self.coef_y, 0.0):
+                    op_list.append(ProductOperator(comps_y,
+                                                   coef=self.coef_y,
+                                                   spins=spins))
+        return op_list
 
 
 if __name__ == '__main__':
     wA = 0.5
     wB = -1.0
     wAB = 0.1
-    x_90 = SpinOperator([ProductOperator('xi', coef=np.pi/2),
-                         ProductOperator('ix', coef=np.pi/2)])
-    x_180 = SpinOperator([ProductOperator('xi', coef=np.pi),
-                          ProductOperator('ix', coef=np.pi)])
-
+    x_90 = Pulse(0, 90, [True, True])
+    x_180 = Pulse(0, 180, [True, True])
     X = np.linspace(0, 20*np.pi, 101)
     sig = np.zeros((X.size, 4))
     rho0 = SpinOperator([ProductOperator('zi'), ProductOperator('iz')])
