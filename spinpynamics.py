@@ -158,7 +158,7 @@ class ProductOperator():
             coef_b = op_t.get_coef()*np.sin(rot_op.coef)
             # Update operators
             op_t.set_coef(coef_a)
-            com_op.set_coef(-coef_b*com_op.get_coef()/1.0j)
+            com_op.set_coef(-coef_b*np.real(com_op.get_coef()/1.0j))
             # If rotation is 90 + n*180 degrees
             if np.isclose(op_t.get_coef(), 0.0):
                 return com_op
@@ -465,7 +465,7 @@ class SpinOperator():
         val : float
             Expectation value
         """
-        return np.trace(np.matmul(self.as_matrix(), op.as_matrix()))
+        return np.real(np.trace(np.matmul(self.as_matrix(), op.as_matrix())))
 
     def nutate(self, rot_op):
         """Brute force nutation of spin operator
@@ -637,7 +637,12 @@ class SpinOperator():
         self
         """
         # Copy operator
-        return SpinOperator(list(self.get_ops_list()) + list(op.get_ops_list()))
+        op_t = SpinOperator(list(self.get_ops_list()))
+        # Add each spin operator in turn
+        for op_ in op.get_ops_list():
+            op_.set_coef(mod*op_.get_coef())
+            op_t = op_t + op_
+        return op_t
 
     def __add__(self, op):
         if isinstance(op, ProductOperator):
@@ -684,10 +689,8 @@ class SpinOperator():
             op = ProductOperator(comps, spins=spins)
             # Get matrix representation
             op_mat = op.as_matrix()
-            # Get normalisation constant
-            norm = np.trace(np.matmul(op_mat, op_mat))
             # Get expectation value
-            coef = np.trace(np.matmul(mat, op_mat))/norm
+            coef = np.trace(np.matmul(mat, op_mat))
             # Store if non-zero
             if ~np.isclose(coef, 0.0):
                 op.set_coef(coef)
@@ -748,28 +751,42 @@ class Pulse(SpinOperator):
 
 
 if __name__ == '__main__':
+    # Spin Hamiltonian frequencies
     wA = 0.5
     wB = -1.0
     wAB = 0.1
+    # Pulses
     x_90 = Pulse(0, 90, [True, True])
     x_180 = Pulse(0, 180, [True, True])
+    # Setup
     X = np.linspace(0, 20*np.pi, 101)
     sig = np.zeros((X.size, 4))
+    # Thermal equilibrium
     rho0 = SpinOperator([ProductOperator('zi'), ProductOperator('iz')])
+    # Apply first pulse
     rho0plus = rho0.nutate(x_90)
-
+    # Loop through time delays
     for i in range(X.size):
+        # Get time
         t = X[i]
+        # Generate free-precession Hamiltonian
         tau = SpinOperator([ProductOperator('zi', coef=wA*t),
                             ProductOperator('iz', coef=wB*t),
                             ProductOperator('zz', coef=wAB*t)])
+        # Free precession
         rhotauminus = rho0plus.nutate(tau)
+        # Pi pulse
         rhotauplus = rhotauminus.nutate(x_180)
+        # Refocuss
         rhotwotau = rhotauplus.nutate(tau)
-        sig[i, 0] = np.real(rhotwotau.expectation_value(ProductOperator('xz')))
-        sig[i, 1] = np.real(rhotwotau.expectation_value(ProductOperator('yi')))
-        sig[i, 2] = np.real(rhotwotau.expectation_value(ProductOperator('zx')))
-        sig[i, 3] = np.real(rhotwotau.expectation_value(ProductOperator('iy')))
+        print(rhotwotau)
+        # Get expectation values
+        sig[i, 0] = rhotwotau.expectation_value(ProductOperator('xz'))
+        sig[i, 1] = rhotwotau.expectation_value(ProductOperator('yi'))
+        sig[i, 2] = rhotwotau.expectation_value(ProductOperator('zx'))
+        sig[i, 3] = rhotwotau.expectation_value(ProductOperator('iy'))
+
+    # Plot expectation values
     fig, ax = plt.subplots()
     ax.plot(X, sig[:, 0], label='Sxz')
     ax.plot(X, sig[:, 1], label='Syi')
