@@ -749,13 +749,12 @@ class Pulse(SpinOperator):
 
     def _get_operators(self, spins):
         op_list = []
+        # Loop through spins
         for i_spin, spin in enumerate(self.active_spins):
+            # If this spin is active
             if spin:
-                comps = ['i' for spin in self.active_spins]
-                comps[i_spin] = 'p'
-                comps = ''.join(comp for comp in comps)
-                comps_x = comps.replace('p', 'x')
-                comps_y = comps.replace('p', 'y')
+                comps_x = pulse_comps(len(self.active_spins), i_spin, 'x')
+                comps_y = pulse_comps(len(self.active_spins), i_spin, 'y')
                 # x-pulse
                 if ~np.isclose(self.coef_x, 0.0):
                     op_list.append(ProductOperator(comps_x,
@@ -798,6 +797,29 @@ class Observables(SpinOperator):
         # Return list of operators
         return [ProductOperator(comps, spins=self.spins)
                 for comps in all_comps]
+
+
+def pulse_comps(n_spins, i_spin, comp):
+    """Make Cartesian components string for a pulse
+
+    Parameters
+    ----------
+    n_spins : int
+        Length of comps
+    i_spin : int
+        Active spin
+    comp : str
+        Component
+
+    Returns
+    -------
+    comps : str
+        String of components
+    """
+    comps = ['i' for spin in range(n_spins)]
+    comps[i_spin] = comp
+    comps = ''.join(comp for comp in comps)
+    return comps
 
 
 if __name__ == '__main__':
