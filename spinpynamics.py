@@ -411,6 +411,9 @@ class SpinOperator(PropogatorMixin):
             mssg = '{:} is not a valid component string'.format(comps)
             raise ValueError(mssg)
 
+    def get_comps_list(self):
+        return list(self.ops.keys())
+
     def get_coef_dict(self):
         return {(comps, op.coef) for comps, op in self.ops.items()}
 
