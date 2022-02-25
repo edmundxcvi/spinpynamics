@@ -4,7 +4,64 @@ from scipy.linalg import expm
 import matplotlib.pyplot as plt
 
 
-class ProductOperator():
+class PropogatorMixin():
+
+    def nutate(self, rot_op, *, force_propogator=False):
+        """Rotate spinoperator about rot_op
+
+        Parameters
+        ----------
+        rot_op : ProductOperator or SpinOperator
+            Operator to nutate by
+        force_propogator : bool
+            Force use of matrix exponentials
+
+        Returns
+        -------
+        op_t : SpinOperator
+            Rotated spin operator, as a new copy of the original spin operator
+        """
+        # If using commutators
+        if force_propogator is False:
+            # If op is a product operator
+            if isinstance(rot_op, ProductOperator):
+                op_t = self._nutate_prodop(rot_op)
+            # Otherwise if it's a spin operator
+            elif isinstance(rot_op, SpinOperator):
+                # If all components commute
+                if rot_op._all_commute() is True:
+                    # Rotate using commuation relationships
+                    op_t = self._nutate_spinop(rot_op)
+                # Otherwise brute force with propogators
+                else:
+                    op_t = self._nutate_propagator(rot_op)
+        else:
+            op_t = self._nutate_propagator(rot_op)
+        return op_t
+
+    def _nutate_propagator(self, rot_op):
+        """Nutate by product operator using propogators
+
+        Parameters
+        ----------
+        rot_op : ProductOperator or SpinOperator
+            Operator to nutate by
+
+        Returns
+        -------
+        op_t : SpinOperator
+            Rotated spin operator, as a new copy of the original spin operator
+        """
+        # Calculate propogators (slow)
+        prop = expm(-1.0j*rot_op.as_matrix())
+        prop_t = expm(+1.0j*rot_op.as_matrix())
+        # Matrix representation of rotated operator
+        op_t_mat = np.matmul(np.matmul(prop, self.as_matrix()), prop_t)
+        # Convert to ProductOperators
+        return SpinOperator.from_mat(op_t_mat)
+
+
+class ProductOperator(PropogatorMixin):
     """Cartesian product operator
 
     Parameters
@@ -13,7 +70,7 @@ class ProductOperator():
         Labels of Cartesian components of each spin in operator - including
         'i' for identity if required.
     coef : float
-        Coeficient of this operator.
+        coefficient of this operator.
     spins : array-like, shape (n_spins, )
         Total spin quantum number of each spin centre. If None (default)
         then all spins are assumed to be S = 1/2.
@@ -61,7 +118,7 @@ class ProductOperator():
             For formatting label, must contain a field for each component.
             If None, label is S{:}, where {:} is replaced by self.comps.
         coef_pattern : str
-            For formatting coefficient. If None then coeficient is not
+            For formatting coefficient. If None then coefficient is not
             included.
 
         Returns
@@ -90,7 +147,7 @@ class ProductOperator():
         ----------
         op : ProductOperator
         norm : bool
-            If True, commutator is returned with unit coeficient.
+            If True, commutator is returned with unit coefficient.
         Returns
         -------
         op_t : ProductOperator
@@ -116,27 +173,13 @@ class ProductOperator():
             else:
                 raise ValueError('Product operator commutator invalid.')
 
-    def nutate(self, rot_op):
-        """Nutate product operator about rotation operator
+    def _nutate_prodop(self, rot_op):
+        """Nutate about another ProductOperator
 
         Parameters
         ----------
-        rot_op : ProductOperator or SpinOperator
+        rot_op : ProductOperator
             Operator to nutate around
-
-        Returns
-        -------
-        op_t : ProductOperator or SpinOperator
-            Rotated copy of self
-        """
-        if isinstance(rot_op, ProductOperator):
-            op_t = self._nutate_prodop(rot_op)
-        else:
-            op_t = self._nutate_spinop(rot_op)
-        return op_t
-
-    def _nutate_prodop(self, rot_op):
-        """Nutate about another ProductOperator
 
         Returns
         -------
@@ -153,7 +196,7 @@ class ProductOperator():
             return op_t
         # If rotation occured
         else:
-            # Get coeficients in rotated operator
+            # Get coefficients in rotated operator
             coef_a = op_t.get_coef()*np.cos(rot_op.coef)
             coef_b = op_t.get_coef()*np.sin(rot_op.coef)
             # Update operators
@@ -172,6 +215,11 @@ class ProductOperator():
     def _nutate_spinop(self, rot_op):
         """Nutate about a SpinOperator
 
+        Parameters
+        ----------
+        rot_op : SpinOperator
+            Operator to nutate around, all components must commute.
+
         Returns
         -------
         op_t : ProductOperator or SpinOperator
@@ -183,18 +231,13 @@ class ProductOperator():
         # If all components of rot_op commute apply in turn
         if rot_op._all_commute():
             # Loop through all components
-            for op_ in rot_op:
+            for op_ in rot_op.get_ops_list():
                 # Nutate operator
                 op_t = op_t.nutate(op_)
-        # If rot_op does not commute use brute force
         else:
-            # Calculate propogators (slow)
-            prop = expm(-1.0j*rot_op.as_matrix())
-            prop_t = expm(+1.0j*rot_op.as_matrix())
-            # Matrix representation of rotated operator
-            op_t_mat = np.matmul(np.matmul(prop, self.as_matrix()), prop_t)
-            # Convert to ProductOperators
-            op_t = SpinOperator.from_mat(op_t_mat)
+            mssg = 'To nutate using commutators all components of the '
+            mssg += 'rotation operator must commute.'
+            raise ValueError(mssg)
         return op_t
 
     def _gen_matrix_rep(self):
@@ -293,7 +336,7 @@ class ProductOperator():
         return self
 
 
-class SpinOperator():
+class SpinOperator(PropogatorMixin):
     """Spin operator (which can comprise linear combinations of product
     operators)
 
@@ -394,7 +437,7 @@ class SpinOperator():
             For formatting label, must contain a field for each component.
             If None, label is S{:}, where {:} is replaced by self.comps.
         coef_pattern : str
-            For formatting coefficient. If None then coeficient is included
+            For formatting coefficient. If None then coefficient is included
             to the first decimal place.
 
         Returns
@@ -403,7 +446,7 @@ class SpinOperator():
         """
         # Get all Cartesian components
         all_comps = [op.comps for op in self.get_ops_list()]
-        all_comps.sort()
+        # all_comps.sort()
         # Start label
         label = ''
         # Loop through all cartesian components
@@ -432,7 +475,7 @@ class SpinOperator():
             raise ValueError(mssg.format(len(self.ops)))
 
     def normalise(self):
-        """Normalises amplitudes of operator coeficients.
+        """Normalises amplitudes of operator coefficients.
 
         Parameters
         ----------
@@ -442,13 +485,13 @@ class SpinOperator():
         -------
         self
         """
-        # Get coeficients
+        # Get coefficients
         coef_array = np.array(self.get_coef_list())
         # Get normalisation constants
         euc_norm = np.sqrt(np.sum(coef_array*coef_array))
         # Normalise array
         coef_norm = coef_array*np.sqrt(2.0)/euc_norm
-        # Update coeficients
+        # Update coefficients
         for coef_, op in zip(coef_norm, self.get_ops_list()):
             op.set_coef(coef_)
         return self
@@ -467,34 +510,7 @@ class SpinOperator():
         """
         return np.real(np.trace(np.matmul(self.as_matrix(), op.as_matrix())))
 
-    def nutate(self, rot_op):
-        """Brute force nutation of spin operator
-
-        Parameters
-        ----------
-        rot_op : ProductOperator or SpinOperator
-            Operator to nutate by
-
-        Returns
-        -------
-        op_t : SpinOperator
-            Rotated spin operator, as a new copy of the original spin operator
-        """
-        # If op is a product operator
-        if isinstance(rot_op, ProductOperator):
-            op_t = self._nut_prodop(rot_op)
-        # Otherwise if it's a spin operator
-        elif isinstance(rot_op, SpinOperator):
-            # If all components commute
-            if rot_op._all_commute() is True:
-                # Rotate using commuation relationships
-                op_t = self._nut_spinop(rot_op)
-            # Otherwise brute force with propogators
-            else:
-                op_t = self._nut_propagator(rot_op)
-        return op_t
-
-    def _nut_prodop(self, rot_op):
+    def _nutate_prodop(self, rot_op):
         """Nutate by product operator using commutators
 
         Parameters
@@ -520,7 +536,7 @@ class SpinOperator():
                 op_t = op_t + op_
         return op_t
 
-    def _nut_spinop(self, rot_op):
+    def _nutate_spinop(self, rot_op):
         """Nutate by spin operator using commutators
 
         Parameters
@@ -535,32 +551,17 @@ class SpinOperator():
         """
         # Copy self
         op_t = SpinOperator(self.get_ops_list())
-        # Loop through all ProductOperators in rot_op
-        for op in rot_op.get_ops_list():
-            # Rotate operator
-            op_t = op_t._nut_prodop(op)
+        # If all components of rot_op commute apply in turn
+        if rot_op._all_commute():
+            # Loop through all ProductOperators in rot_op
+            for op in rot_op.get_ops_list():
+                # Rotate operator
+                op_t = op_t._nut_prodop(op)
+        else:
+            mssg = 'To nutate using commutators all components of the '
+            mssg += 'rotation operator must commute.'
+            raise ValueError(mssg)
         return op_t
-
-    def _nut_propagator(self, rot_op):
-        """Nutate by product operator using propogators
-
-        Parameters
-        ----------
-        rot_op : ProductOperator or SpinOperator
-            Operator to nutate by
-
-        Returns
-        -------
-        op_t : SpinOperator
-            Rotated spin operator, as a new copy of the original spin operator
-        """
-        # Calculate propogators (slow)
-        prop = expm(-1.0j*rot_op.as_matrix())
-        prop_t = expm(+1.0j*rot_op.as_matrix())
-        # Matrix representation of rotated operator
-        op_t_mat = np.matmul(np.matmul(prop, self.as_matrix()), prop_t)
-        # Convert to ProductOperators
-        return SpinOperator.from_mat(op_t_mat)
 
     def _all_commute(self):
         """Determine if all operators in SpinOperator commute
@@ -676,7 +677,6 @@ class SpinOperator():
         # Get number of spins
         if spins is None:
             n_spins = int(np.log2(mat.shape[0]))
-            # spins = np.ones((n_spins,))/2.0
         else:
             n_spins = len(spins)
         # Get components of all Cartesian product operators as strings
@@ -750,6 +750,11 @@ class Pulse(SpinOperator):
         return op_list
 
 
+def Observables(SpinOperator):
+    """SpinOperator with all Cartesian component operators.
+
+    As initialised, all operators have unit coef"""
+
 if __name__ == '__main__':
     # Spin Hamiltonian frequencies
     wA = 0.5
@@ -764,22 +769,21 @@ if __name__ == '__main__':
     # Thermal equilibrium
     rho0 = SpinOperator([ProductOperator('zi'), ProductOperator('iz')])
     # Apply first pulse
-    rho0plus = rho0.nutate(x_90)
+    rho0plus = rho0.nutate(x_90, force_propogator=True)
     # Loop through time delays
-    for i in range(X.size):
+    for i in range(X.size - 1):
         # Get time
-        t = X[i]
+        t = X[i + 1]
         # Generate free-precession Hamiltonian
         tau = SpinOperator([ProductOperator('zi', coef=wA*t),
                             ProductOperator('iz', coef=wB*t),
                             ProductOperator('zz', coef=wAB*t)])
         # Free precession
-        rhotauminus = rho0plus.nutate(tau)
+        rhotauminus = rho0plus.nutate(tau, force_propogator=True)
         # Pi pulse
-        rhotauplus = rhotauminus.nutate(x_180)
+        rhotauplus = rhotauminus.nutate(x_180, force_propogator=True)
         # Refocuss
-        rhotwotau = rhotauplus.nutate(tau)
-        print(rhotwotau)
+        rhotwotau = rhotauplus.nutate(tau, force_propogator=True)
         # Get expectation values
         sig[i, 0] = rhotwotau.expectation_value(ProductOperator('xz'))
         sig[i, 1] = rhotwotau.expectation_value(ProductOperator('yi'))
