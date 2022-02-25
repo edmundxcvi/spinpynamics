@@ -4,6 +4,23 @@ from scipy.linalg import expm
 import matplotlib.pyplot as plt
 
 
+def _get_all_comps(n_spins):
+    """Makes list of all possible Cartesian components
+
+    Parameters
+    ----------
+    n_spins : int
+        Number of spins
+
+    Returns
+    -------
+    all_comps : list of str
+        All Cartesian components
+    """
+    all_comps = (product(['i', 'x', 'y', 'z'], repeat=n_spins))
+    return [''.join(comp) for comp in all_comps]
+
+
 class PropogatorMixin():
 
     def nutate(self, rot_op, *, force_propogator=False):
@@ -680,8 +697,7 @@ class SpinOperator(PropogatorMixin):
         else:
             n_spins = len(spins)
         # Get components of all Cartesian product operators as strings
-        all_comps = (product(['i', 'x', 'y', 'z'], repeat=n_spins))
-        all_comps = [''.join(comp) for comp in all_comps]
+        all_comps = _get_all_comps(n_spins)
         # Loop through all components
         ops = []
         for comps in all_comps:
@@ -750,10 +766,36 @@ class Pulse(SpinOperator):
         return op_list
 
 
-def Observables(SpinOperator):
+class Observables(SpinOperator):
     """SpinOperator with all Cartesian component operators.
 
-    As initialised, all operators have unit coef"""
+    As initialised, all operators have unit coefficients.
+
+    Parameters
+    ----------
+    spins : array-like, shape (n_spins, )
+        Total spin quantum number of each spin centre.
+    identity : bool
+        If True includes identity element.
+    """
+
+    def __init__(self, spins, *, identity=False):
+        self.spins = spins
+        self.identity = identity
+        self._n_spins = len(spins)
+        super().__init__(self._get_operators(spins))
+
+    def _get_operators(self):
+        """Make list of all operators"""
+        # Get all Cartesian components
+        all_comps = _get_all_comps(self._n_spins)
+        # Remove identity if requested
+        if self.identity is False:
+            all_comps.pop[0]
+        # Return list of operators
+        return [ProductOperator(comps, spins=self.spins)
+                for comps in all_comps]
+
 
 if __name__ == '__main__':
     # Spin Hamiltonian frequencies
