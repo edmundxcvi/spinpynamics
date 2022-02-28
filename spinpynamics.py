@@ -722,50 +722,195 @@ class Pulse(SpinOperator):
 
     Parameters
     ----------
-    phase : float
-        Phase of pulse in **degrees**, i.e. 0 for +x, 90 for +y, 180 for -x,
+    phases : float or array-like, shape (n_spins, )
+        Phase(s) of pulse in **degrees**, i.e. 0 for +x, 90 for +y, 180 for -x,
         270 for -y.
-    beta : float
-        Flip angle in **degrees**, i.e. 90 for pi/2 pulse and 180 for pi pulse
+    betas : float or array-like, shape (n_spins, )
+        Flip angle(s) in **degrees**, i.e. 90 for pi/2 pulse and 180 for pi
+        pulse
     active_spins : array-like of bool
-        Spins which pulse acts on
+        Spins which pulse acts on. Only required if beta is a float.
     spins : array-like, shape (n_spins, )
         Total spin quantum number of each spin centre. If None (default)
         then all spins are assumed to be S = 1/2.
     """
 
-    def __init__(self, phase, beta, active_spins, *, spins=None):
-        self.phase = phase
-        self.beta = beta
+    def __init__(self, phases, betas, *, active_spins=None, spins=None):
+        self.phases = phases
+        self.betas = betas
         self.active_spins = active_spins
-        self._get_coefs()
+        self._parse_input()
         super().__init__(self._get_operators(spins))
 
-    def _get_coefs(self):
-        degree = 180.0/np.pi
-        self.coef_x = np.cos(self.phase/degree)*self.beta/degree
-        self.coef_y = np.sin(self.phase/degree)*self.beta/degree
-        return self
+    def _parse_input(self):
+        """Check that enough information is given"""
+        # If betas are iterable
+        try:
+            self.betas[0]
+            self.betas_ = self.betas
+            self.active_spins_ = np.logical_not(np.isclose(self.betas_, 0.0))
+        # If only one flip angle given
+        except TypeError:
+            # If active spins also given
+            if self.active_spins is not None:
+                # Set all active pulses to have same flip angle
+                self.betas_ = [self.betas if active else 0.0
+                               for active in self.active_spins]
+            # Otherwise complain
+            else:
+                mssg = 'If only one flip angle is specified, ' + \
+                       'then active_spins must also be specified'
+                raise ValueError(mssg)
+        # Same trick for pulse phases
+        try:
+            self.phases[0]
+            self.phases_ = self.phases
+        except TypeError:
+            # If active spins also given
+            if self.active_spins is not None:
+                # Set all active pulses to have the same phase
+                self.phases_ = [self.phases if active else 0.0
+                                for active in self.active_spins]
+            # Otherwise complain
+            else:
+                mssg = 'If only one pulse phase is specified, ' + \
+                       'then active_spins must also be specified'
+                raise ValueError(mssg)
 
     def _get_operators(self, spins):
         op_list = []
         # Loop through spins
-        for i_spin, spin in enumerate(self.active_spins):
+        n_spins = len(self.phases_)
+        spins_inds = range(len(self.phases_))
+        for i_spin, phase, beta in zip(spins_inds, self.phases_, self.betas_):
             # If this spin is active
-            if spin:
-                comps_x = pulse_comps(len(self.active_spins), i_spin, 'x')
-                comps_y = pulse_comps(len(self.active_spins), i_spin, 'y')
-                # x-pulse
-                if ~np.isclose(self.coef_x, 0.0):
-                    op_list.append(ProductOperator(comps_x,
-                                                   coef=self.coef_x,
+            if ~np.isclose(beta, 0.0):
+                # Get Cartesian components
+                comps_x = Pulse.pulse_comps(n_spins, i_spin, 'x')
+                comps_y = Pulse.pulse_comps(n_spins, i_spin, 'y')
+                # Get powers of x and y pulses
+                omega_1 = beta*np.pi/180.0
+                coef_x = omega_1*np.cos(phase*np.pi/180.0)
+                coef_y = omega_1*np.sin(phase*np.pi/180.0)
+                # Make x-pulse
+                if ~np.isclose(coef_x, 0.0):
+                    op_list.append(ProductOperator(comps_x, coef=coef_x,
                                                    spins=spins))
-                # y-pulse
-                if ~np.isclose(self.coef_y, 0.0):
-                    op_list.append(ProductOperator(comps_y,
-                                                   coef=self.coef_y,
+                # Make y-pulse
+                if ~np.isclose(coef_y, 0.0):
+                    op_list.append(ProductOperator(comps_y, coef=coef_y,
                                                    spins=spins))
+        # If no active pulses, use identity
+        if op_list == []:
+            identity_comps = ''.join(['i' for i_spin in range(n_spins)])
+            op_list.append(ProductOperator(identity_comps, spins=n_spins))
         return op_list
+
+    def from_spinop(op, *, spins=None):
+        """Make Pulse from SpinOperator object
+
+        Parameters
+        ----------
+        op : SpinOperator
+            Operator representing Pulse
+        spins : array-like, shape (n_spins, )
+            Total spin quantum number of each spin centre. If None (default)
+            then all spins are assumed to be S = 1/2.
+        Returns
+        -------
+        Pulse
+        """
+        phases, betas = Pulse._decompose_spinop(op)
+        return Pulse(phases, betas, spins)
+
+    def from_ops(ops, *, spins=None):
+        """Make Pulse from list of ProductOperators
+
+        Parameters
+        ----------
+        ops : array-like of ProductOperator objects
+            Operators which make up SpinOperator.
+        spins : array-like, shape (n_spins, )
+            Total spin quantum number of each spin centre. If None (default)
+            then all spins are assumed to be S = 1/2.
+
+        Returns
+        -------
+        Pulse
+        """
+        return Pulse.from_spinop(SpinOperator(ops), spins)
+
+    def from_prodop(op, *, spins=None):
+        """Make Pulse from a ProductOperator
+
+        Parameters
+        ----------
+        op : ProductOperator objects
+            Operator
+        spins : array-like, shape (n_spins, )
+            Total spin quantum number of each spin centre. If None (default)
+            then all spins are assumed to be S = 1/2.
+
+        Returns
+        -------
+        Pulse
+        """
+        return Pulse.from_ops([op], spins=None)
+
+    @staticmethod
+    def _decompose_spinop(op):
+        # Get components of operator
+        comps_list = op.get_comps_list()
+        # Get number of spins
+        n_spins = len(comps_list[0])
+        # Make outputs
+        phases = np.zeros((n_spins, ))
+        betas = np.zeros((n_spins, ))
+        # Loop through all spins
+        for i_spin in range(n_spins):
+            # Get components for pulsing this spin
+            comps_x = Pulse.pulse_comps(n_spins, i_spin, 'x')
+            comps_y = Pulse.pulse_comps(n_spins, i_spin, 'y')
+            # Set coefficients to 0.0
+            coef = 0.0
+            # If x component present add power and delete from all operators
+            if comps_x in comps_list:
+                coef += op.get_coef(comps_x)
+                comps_list.remove(comps_x)
+            # If y component present add power and delete from all operators
+            if comps_y in comps_list:
+                coef += 1.0j*op.get_coef(comps_y)
+                comps_list.remove(comps_y)
+            # Get phase and power
+            phases[i_spin] = np.angle(coef)*180.0/np.pi
+            betas[i_spin] = np.abs(coef)*180.0/np.pi
+        # Complain if pulses are left over
+        if comps_list != []:
+            mssg = 'Pulses cannot contain {} operators'
+            raise ValueError(mssg.format(comps_list))
+        return phases, betas
+
+    def pulse_comps(n_spins, i_spin, comp):
+        """Make Cartesian components string for a pulse
+
+        Parameters
+        ----------
+        n_spins : int
+            Length of comps
+        i_spin : int
+            Active spin
+        comp : str
+            Component
+
+        Returns
+        -------
+        comps : str
+            String of components
+        """
+        comps = ['i' for spin in range(n_spins)]
+        comps[i_spin] = comp
+        comps = ''.join(comp for comp in comps)
+        return comps
 
 
 class Observables(SpinOperator):
@@ -799,37 +944,16 @@ class Observables(SpinOperator):
                 for comps in all_comps]
 
 
-def pulse_comps(n_spins, i_spin, comp):
-    """Make Cartesian components string for a pulse
-
-    Parameters
-    ----------
-    n_spins : int
-        Length of comps
-    i_spin : int
-        Active spin
-    comp : str
-        Component
-
-    Returns
-    -------
-    comps : str
-        String of components
-    """
-    comps = ['i' for spin in range(n_spins)]
-    comps[i_spin] = comp
-    comps = ''.join(comp for comp in comps)
-    return comps
-
-
 if __name__ == '__main__':
     # Spin Hamiltonian frequencies
     wA = 0.5
     wB = -1.0
     wAB = 0.1
     # Pulses
-    x_90 = Pulse(0, 90, [True, True])
-    x_180 = Pulse(0, 180, [True, True])
+    x_90 = Pulse(0, 90, active_spins=[True, True])
+    x_180 = Pulse(0, 180, active_spins=[True, True])
+    x_90 = Pulse(0, [90, 90], active_spins=[True, True])
+    x_180 = Pulse([0, 90], 180, active_spins=[True, True])
     # Setup
     X = np.linspace(0, 20*np.pi, 101)
     sig = np.zeros((X.size, 4))
