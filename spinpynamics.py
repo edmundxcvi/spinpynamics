@@ -944,6 +944,27 @@ class Observables(SpinOperator):
                 for comps in all_comps]
 
 
+def ensure_pulse(op):
+    """Convert PulseOperator, list of PulseOperator, or SpinOperator to Pulse
+    """
+    if isinstance(op, ProductOperator):
+        return Pulse.from_prodop(op)
+    elif isinstance(op, SpinOperator):
+        return Pulse.from_spinop(op)
+    elif isinstance(op, Pulse):
+        return op
+    else:
+        try:
+            op1 = isinstance(op[0], ProductOperator)
+            if op1:
+                return Pulse.from_ops(op)
+        except TypeError:
+            mssg = 'Could not convert operator to Pulse'
+            raise ValueError(mssg)
+    mssg = 'Could not convert operator to Pulse'
+    raise ValueError(mssg)
+
+
 if __name__ == '__main__':
     # Spin Hamiltonian frequencies
     wA = 0.5
