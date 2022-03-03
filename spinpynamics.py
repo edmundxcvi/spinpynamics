@@ -947,12 +947,12 @@ class Observables(SpinOperator):
 def ensure_pulse(op):
     """Convert PulseOperator, list of PulseOperator, or SpinOperator to Pulse
     """
-    if isinstance(op, ProductOperator):
-        return Pulse.from_prodop(op)
+    if isinstance(op, Pulse):
+        return op
     elif isinstance(op, SpinOperator):
         return Pulse.from_spinop(op)
-    elif isinstance(op, Pulse):
-        return op
+    elif isinstance(op, ProductOperator):
+        return Pulse.from_prodop(op)
     else:
         try:
             op1 = isinstance(op[0], ProductOperator)
