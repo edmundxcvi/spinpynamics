@@ -576,7 +576,7 @@ class SpinOperator(PropogatorMixin):
             # Loop through all ProductOperators in rot_op
             for op in rot_op.get_ops_list():
                 # Rotate operator
-                op_t = op_t._nut_prodop(op)
+                op_t = op_t._nutate_prodop(op)
         else:
             mssg = 'To nutate using commutators all components of the '
             mssg += 'rotation operator must commute.'
@@ -803,7 +803,7 @@ class Pulse(SpinOperator):
         # If no active pulses, use identity
         if op_list == []:
             identity_comps = ''.join(['i' for i_spin in range(n_spins)])
-            op_list.append(ProductOperator(identity_comps, spins=n_spins))
+            op_list.append(ProductOperator(identity_comps, spins=spins))
         return op_list
 
     def from_spinop(op, *, spins=None):
@@ -930,7 +930,7 @@ class Observables(SpinOperator):
         self.spins = spins
         self.identity = identity
         self._n_spins = len(spins)
-        super().__init__(self._get_operators(spins))
+        super().__init__(self._get_operators())
 
     def _get_operators(self):
         """Make list of all operators"""
@@ -938,7 +938,7 @@ class Observables(SpinOperator):
         all_comps = _get_all_comps(self._n_spins)
         # Remove identity if requested
         if self.identity is False:
-            all_comps.pop[0]
+            all_comps.pop(0)
         # Return list of operators
         return [ProductOperator(comps, spins=self.spins)
                 for comps in all_comps]
