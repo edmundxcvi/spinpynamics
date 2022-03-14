@@ -146,7 +146,7 @@ class ProductOperator(PropogatorMixin):
         if op_pattern is None:
             op_label = 'S' + ''.join([comp for comp in self.comps])
         else:
-            op_label = op_pattern.format([comp for comp in self.comps])
+            op_label = op_pattern.format(*[comp for comp in self.comps])
         # Add amplitude if requested
         if coef_pattern is None:
             coef_label = ''
@@ -375,8 +375,12 @@ class SpinOperator(PropogatorMixin):
         for op in ops[1:]:
             self._add_prodop(op)
 
-    def get_label(self):
-        return self.as_string()
+    def get_label(self, op_pattern=None, coef_pattern='{+.1f}'):
+        return self.as_string(op_pattern, coef_pattern)
+
+    def get_label_list(self, op_pattern=None, coef_pattern='{+.1f}'):
+        return [op.as_string(op_pattern, coef_pattern)
+                for op in self.ops.values()]
 
     def set_coef(self, comps, coef):
         """Set coefficient of an operator
