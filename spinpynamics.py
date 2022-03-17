@@ -926,12 +926,15 @@ class Observables(SpinOperator):
     ----------
     spins : array-like, shape (n_spins, )
         Total spin quantum number of each spin centre.
+    coefs : array-like, shape (n_ops, )
+        Coefficient of each operator. If not given taken as 1.0.
     identity : bool
         If True includes identity element.
     """
 
-    def __init__(self, spins, *, identity=False):
+    def __init__(self, spins, *, coefs=None, identity=False):
         self.spins = spins
+        self.coefs = coefs
         self.identity = identity
         self._n_spins = len(spins)
         super().__init__(self._get_operators())
@@ -943,9 +946,17 @@ class Observables(SpinOperator):
         # Remove identity if requested
         if self.identity is False:
             all_comps.pop(0)
+        # Set default coefficients if requested
+        if self.coefs is None:
+            all_coefs = np.ones((len(all_comps), ))
+        else:
+            try:
+                all_coefs = np.array([coef for coef in self.coefs])
+            except TypeError:
+                all_coefs = self.coefs*np.ones((len(all_comps), ))
         # Return list of operators
-        return [ProductOperator(comps, spins=self.spins)
-                for comps in all_comps]
+        return [ProductOperator(comps, coef=coef, spins=self.spins)
+                for (comps, coef) in zip(all_comps, all_coefs)]
 
 
 def ensure_pulse(op):
