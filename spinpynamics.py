@@ -393,8 +393,8 @@ class SpinOperator(PropogatorMixin):
         coef : float
             Coefficient of operator
         """
-        if comps in self.comps:
-            self.ops_[comps].coef = coef
+        if comps in self.get_comps_list():
+            self.ops[comps].coef = coef
         else:
             mssg = '{:} is not a valid component string'.format(comps)
             raise ValueError(mssg)
@@ -409,8 +409,8 @@ class SpinOperator(PropogatorMixin):
             Labels of Cartesian components of each spin in operator - including
             'i' for identity if required.
         """
-        if comps in self.comps:
-            return self.ops_[comps].coef
+        if comps in self.get_comps_list():
+            return self.ops[comps].coef
         else:
             mssg = '{:} is not a valid component string'.format(comps)
             raise ValueError(mssg)
