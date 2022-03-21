@@ -269,9 +269,18 @@ class ProductOperator(PropogatorMixin):
             self._mat_rep = np.kron(self._mat_rep, op_mat)
         # Count final dimension
         self._n_hilb = self._mat_rep.shape[0]
-        # Normalise
-        self._scale = np.trace(np.matmul(self._mat_rep, self._mat_rep))
-        self._scale = 1.0/np.sqrt(self._scale)
+        # Get value to normalise trace to
+        if self.spins is None:
+            s_0 = 1/2
+        else:
+            s_0 = self.spins[0]
+        target_trace_sq = self._n_hilb*s_0*(s_0 + 1.0)/3.0
+        # Get current value of trace
+        current_trace_sq = np.trace(np.matmul(self._mat_rep, self._mat_rep))
+        # Get scale factor
+        self._scale = np.sqrt(target_trace_sq/current_trace_sq)
+        # self._scale =
+        # self._scale = 1.0/np.sqrt(self._scale)
         self._mat_rep *= self._scale
         return self
 
