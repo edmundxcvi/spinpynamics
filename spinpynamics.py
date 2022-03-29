@@ -88,14 +88,20 @@ class ProductOperator(PropogatorMixin):
         'i' for identity if required.
     coef : float
         coefficient of this operator.
+    scale : float
+        Normaliseation constant for the operator. Related to coef, but
+        immutable. For example in a two-spin-1/2 system the operators with
+        multi-spin order are typically normalised by 2, e.g. 2SxSx. If not
+        given, the normalisation constant is chosen such that the trace of
     spins : array-like, shape (n_spins, )
         Total spin quantum number of each spin centre. If None (default)
         then all spins are assumed to be S = 1/2.
     """
 
-    def __init__(self, comps, *, coef=1.0, spins=None):
+    def __init__(self, comps, *, coef=1.0, scale=None, spins=None):
         self.comps = comps
         self.coef = coef
+        self.scale = scale
         self.spins = spins
         self._gen_matrix_rep()
 
@@ -142,11 +148,21 @@ class ProductOperator(PropogatorMixin):
         -------
         label : str
         """
+        # Convert scale to string
+        if ~np.isclose(self._scale, 1.0):
+            if self._scale.is_integer():
+                scale_label = str(int(self._scale))
+            else:
+                inv_scale = int(1.0/self._scale)
+                scale_label = r'$\frac{{1}}{{{:}}}$'.format(inv_scale)
+        else:
+            scale_label = ''
         # Make operator string
         if op_pattern is None:
-            op_label = 'S' + ''.join([comp for comp in self.comps])
+            op_label = str(self._scale) + 'S'
+            op_label += ''.join([comp for comp in self.comps])
         else:
-            op_label = op_pattern.format(*[comp for comp in self.comps])
+            op_label = op_pattern.format(scale_label, *[comp for comp in self.comps])
         # Add amplitude if requested
         if coef_pattern is None:
             coef_label = ''
@@ -269,18 +285,21 @@ class ProductOperator(PropogatorMixin):
             self._mat_rep = np.kron(self._mat_rep, op_mat)
         # Count final dimension
         self._n_hilb = self._mat_rep.shape[0]
-        # Get value to normalise trace to
-        if self.spins is None:
-            s_0 = 1/2
+        # Normalise operator
+        if self.scale is None:
+            if self.spins is None:
+                s_0 = 1/2
+            else:
+                s_0 = self.spins[0]
+            # Get target trace
+            target_trace_sq = self._n_hilb*s_0*(s_0 + 1.0)/3.0
+            # Get current value of trace
+            mat_req_sq = np.matmul(self._mat_rep, self._mat_rep)
+            current_trace_sq = np.trace(mat_req_sq)
+            # Get scale factor
+            self._scale = np.real(np.sqrt(target_trace_sq/current_trace_sq))
         else:
-            s_0 = self.spins[0]
-        target_trace_sq = self._n_hilb*s_0*(s_0 + 1.0)/3.0
-        # Get current value of trace
-        current_trace_sq = np.trace(np.matmul(self._mat_rep, self._mat_rep))
-        # Get scale factor
-        self._scale = np.sqrt(target_trace_sq/current_trace_sq)
-        # self._scale =
-        # self._scale = 1.0/np.sqrt(self._scale)
+            self._scale = self.scale
         self._mat_rep *= self._scale
         return self
 
