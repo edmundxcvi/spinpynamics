@@ -1,4 +1,5 @@
 from itertools import product
+from xml.etree.ElementInclude import include
 import numpy as np
 from scipy.linalg import expm
 import matplotlib.pyplot as plt
@@ -132,22 +133,28 @@ class ProductOperator(PropogatorMixin):
         else:
             return self.coef*self._mat_rep
 
-    def as_string(self, op_pattern=None, coef_pattern=None):
+    def as_string(self, op_pattern=None, coef_pattern=None,
+                  include_identity=True):
         """Generate string representation of cartesian component operator
 
         Parameters
         ----------
         op_pattern : str
-            For formatting label, must contain a field for each component.
-            If None, label is S{:}, where {:} is replaced by self.comps.
+            For formatting label, must contain n_spins + 1 replacement fields.
+            The first field is used for the scale, and subsequent fields are
+            used for the components. If None, label is {:}S{:}.
         coef_pattern : str
             For formatting coefficient. If None then coefficient is not
             included.
+        include_identity : bool
+            If False an attempt is made to remove the identity operators. For
+            this to succeed, all replacement fields in op_pattern must be {:}.
 
         Returns
         -------
         label : str
         """
+
         # Convert scale to string
         if ~np.isclose(self._scale, 1.0):
             if self._scale.is_integer():
@@ -157,17 +164,43 @@ class ProductOperator(PropogatorMixin):
                 scale_label = r'$\frac{{1}}{{{:}}}$'.format(inv_scale)
         else:
             scale_label = ''
-        # Make operator string
+
+        # Get Cartesian components
+        comps = self.comps
+
+        # Make operator pattern if not given
         if op_pattern is None:
-            op_label = str(self._scale) + 'S'
-            op_label += ''.join([comp for comp in self.comps])
-        else:
-            op_label = op_pattern.format(scale_label, *[comp for comp in self.comps])
+            op_pattern = '{:}' + 'S' + len(self.comps)*'{:}'
+
+        # Try to get rid of identity elements
+        if include_identity is False:
+            # Split up operator pattern
+            op_pattern_split = op_pattern.split('{:}')
+            # Get scale part of operator pattern
+            op_pattern_list = [op_pattern_split[0] + '{:}']
+            # Start list of non-identity components
+            comp_list = []
+            # Loop throuh all components
+            for comp, pattern in zip(comps, op_pattern_split[1:]):
+                # If non-identity add to lists
+                if comp != 'i':
+                    comp_list.append(comp)
+                    op_pattern_list.append(pattern + '{:}')
+            # Add final part of operator pattern
+            op_pattern_list.append(op_pattern_split[-1])
+            # Convert both to strings
+            comps = ''.join(comp_list)
+            op_pattern = ''.join(op_pattern_list)
+
+        # Make operator string
+        op_label = op_pattern.format(scale_label, *comps)
+
         # Add amplitude if requested
         if coef_pattern is None:
             coef_label = ''
         else:
             coef_label = coef_pattern.format(self.coef)
+
         # Combine and return
         return coef_label + op_label
 
@@ -403,11 +436,13 @@ class SpinOperator(PropogatorMixin):
         for op in ops[1:]:
             self._add_prodop(op)
 
-    def get_label(self, op_pattern=None, coef_pattern='{+.1f}'):
-        return self.as_string(op_pattern, coef_pattern)
+    def get_label(self, op_pattern=None, coef_pattern='{+.1f}',
+                  include_identity=True):
+        return self.as_string(op_pattern, coef_pattern, include_identity)
 
-    def get_label_list(self, op_pattern=None, coef_pattern='{+.1f}'):
-        return [op.as_string(op_pattern, coef_pattern)
+    def get_label_list(self, op_pattern=None, coef_pattern='{+.1f}',
+                       include_identity=True):
+        return [op.as_string(op_pattern, coef_pattern, include_identity)
                 for op in self.ops.values()]
 
     def set_coef(self, comps, coef):
@@ -480,7 +515,8 @@ class SpinOperator(PropogatorMixin):
                     mat = 0.0*op.as_matrix() + op.as_matrix()
         return mat
 
-    def as_string(self, op_pattern=None, coef_pattern='{:+.1f}'):
+    def as_string(self, op_pattern=None, coef_pattern='{:+.1f}',
+                  include_identity=True):
         """Generate string representation of spin operator
 
         Parameters
@@ -491,6 +527,9 @@ class SpinOperator(PropogatorMixin):
         coef_pattern : str
             For formatting coefficient. If None then coefficient is included
             to the first decimal place.
+        include_identity : bool
+            If False an attempt is made to remove the identity operators. For
+            this to succeed, all replacement fields in op_pattern must be {:}.
 
         Returns
         -------
@@ -507,7 +546,8 @@ class SpinOperator(PropogatorMixin):
             op = self.ops[comps_]
             # If there is non-zero amounts of it add it to the total
             if ~np.isclose(op.coef, 0.0):
-                label += op.as_string(op_pattern, coef_pattern=coef_pattern)
+                label += op.as_string(op_pattern, coef_pattern,
+                                      include_identity)
         return label
 
     def as_prodop(self):
